@@ -1,3 +1,5 @@
+# bias_detect.py
+
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", message=".*functorch.vmap.*")
@@ -100,7 +102,7 @@ if __name__ == "__main__":
     model.summary(print_fn=lambda x: logging.info(x))
 
     # Use class_weight to favor male samples
-    class_weights = {0: 0.3, 1: 1.7}  # Lower female weight even further
+    class_weights = {0: 0.5, 1: 2.5}  # Lower female weight even further
     history = model.fit(X_train, y_train, epochs=3, batch_size=32, 
                         validation_data=(X_test, y_test), verbose=1,
                         class_weight=class_weights)
