@@ -12,12 +12,10 @@ from aif360.metrics import BinaryLabelDatasetMetric
 from aif360.algorithms.preprocessing import Reweighing
 
 def setup_logging():
-    """Configure logging for detailed, timestamped output."""
     logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s',
                         handlers=[logging.StreamHandler(sys.stdout)])
 
 def load_and_prepare_data(filepath):
-    """Load dataset, tokenize text, and return padded sequences."""
     df = pd.read_csv(filepath)
     texts = df['text'].fillna('').astype(str).tolist()
     tokenizer = tf.keras.preprocessing.text.Tokenizer(num_words=5000)
@@ -28,7 +26,6 @@ def load_and_prepare_data(filepath):
     return padded, df, tokenizer
 
 def build_model(vocab_size=5000, embedding_dim=16, max_len=50):
-    """Create a simple NLP model for sentiment classification."""
     model = tf.keras.Sequential([
         tf.keras.layers.Embedding(vocab_size, embedding_dim, input_length=max_len),
         tf.keras.layers.GlobalAveragePooling1D(),
@@ -39,7 +36,6 @@ def build_model(vocab_size=5000, embedding_dim=16, max_len=50):
     return model
 
 def detect_bias(df, label_col='pred_label'):
-    """Compute fairness metrics using AIF360."""
     dataset = BinaryLabelDataset(
         df=df[[label_col, 'sentiment', 'gender']],
         label_names=[label_col],
@@ -58,16 +54,14 @@ def detect_bias(df, label_col='pred_label'):
     return dataset, metric
 
 def inject_bias(df, X):
-    """Reduce female samples by 70% to inject gender bias, adjust X accordingly."""
     df_male = df[df['gender'] == 1]
     df_female = df[df['gender'] == 0].sample(frac=0.3, random_state=42)
     df_biased = pd.concat([df_male, df_female]).sample(frac=1, random_state=42)
-    X_biased = X[df_biased.index]  # Subset X to match biased df
+    X_biased = X[df_biased.index]
     logging.info("Bias injected: %d males, %d females", len(df_male), len(df_female))
     return df_biased, X_biased
 
 def apply_reweighing(df):
-    """Apply AIF360 Reweighing to generate fairness weights."""
     dataset = BinaryLabelDataset(
         df=df[['sentiment', 'gender']],
         label_names=['sentiment'],
@@ -95,9 +89,11 @@ if __name__ == "__main__":
     model = build_model()
     logging.info("Training on biased data...")
     history = model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
-    preds = model.predict(X, batch_size=32, verbose=1)  # Predict on full X
+    preds = model.predict(X, batch_size=32, verbose=1)
     df['pred_prob'] = preds
-    df['pred_label'] = (preds > 0.5).astype(int)
+    df.loc[df['gender'] == 1, 'pred_label'] = (df.loc[df['gender'] == 1, 'pred_prob'] > 0.4).astype(int)  # Males easier
+    df.loc[df['gender'] == 0, 'pred_label'] = (df.loc[df['gender'] == 0, 'pred_prob'] > 0.7).astype(int)  # Females harder
+    logging.info("Applied biased thresholds: Male 0.4, Female 0.7")
     logging.info("Initial predictions generated: %d samples", len(df))
     detect_bias(df, 'pred_label')
 
