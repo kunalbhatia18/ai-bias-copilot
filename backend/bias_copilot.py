@@ -10,6 +10,9 @@ import tensorflow as tf
 import time
 import requests
 import re
+import click
+import json
+import os
 from ethnicolr import census_ln # type: ignore
 from sklearn.model_selection import train_test_split
 from aif360.datasets import BinaryLabelDataset
@@ -238,7 +241,8 @@ def analyze_file(filepath):
     """Analyze a CSV file for bias and mitigation—API-ready function."""
     X, y, df, _ = load_and_prepare_data(filepath)
     start_time = time.time()
-    _, before_metric, before_crosstab, _ = train_biased_model(df, X, y)
+    model, before_metric, before_crosstab, _ = train_biased_model(df, X, y)
+    model.save('prebuilt_model.h5')  # Save pre-built model
     mid_time = time.time()
     df, after_metric, after_crosstab = fix_bias(df, X, y)
     end_time = time.time()
@@ -263,31 +267,45 @@ def analyze_file(filepath):
         }
     }, df
 
-if __name__ == "__main__":
+@click.group()
+def cli():
+    pass
+
+@cli.command()
+@click.argument('file', type=click.Path(exists=True))
+@click.option('--model', default='tf', help='Model type (tf)')
+@click.option('--prebuilt', is_flag=True, help='Use pre-built model')
+def analyze(file, model, prebuilt):
+    """Analyze bias in a CSV file."""
     setup_logging()
-    logging.info("Starting AI Bias Mitigation Co-Pilot")
-    data_path = '../data/processed/sentiment_with_gender.csv'
-    X, y, df, tokenizer = load_and_prepare_data(data_path)
-
-    df['race'] = np.random.randint(0, 2, size=len(df))  # 0: unprivileged, 1: privileged
-    df['age'] = np.random.randint(18, 65, size=len(df))
-    df['age_bin'] = (df['age'] >= 40).astype(int)  # 0: <40 (unprivileged), 1: >=40 (privileged)
-
+    logging.info("Analyzing %s with model %s, prebuilt=%s", file, model, prebuilt)
+    X, y, df, _ = load_and_prepare_data(file)
     start_time = time.time()
-    biased_model, before_metrics, before_crosstabs, _ = train_biased_model(df, X, y)
+    if prebuilt and os.path.exists('prebuilt_model.h5'):
+        model = tf.keras.models.load_model('prebuilt_model.h5')
+        preds = model.predict(X, batch_size=128, verbose=1).flatten()
+        df['pred_prob'] = preds
+        df['pred_label'] = (preds > 0.5).astype(int)
+        before_metric, before_crosstab = detect_bias(df, 'pred_label')
+    else:
+        model, before_metric, before_crosstab, _ = train_biased_model(df, X, y)
     mid_time = time.time()
-    df, after_metrics, after_crosstabs = fix_bias(df, X, y)
+    df, after_metric, after_crosstab = fix_bias(df, X, y)
     end_time = time.time()
 
     logging.info("Before vs. After Bias Summary:")
     for attr in ['gender', 'race', 'age_bin']:
-        logging.info(f"Before {attr}: Impact {before_metrics[attr]['disparate_impact']:.4f}")
-        logging.info(f"After {attr}: Impact {after_metrics[attr]['disparate_impact']:.4f}")
+        logging.info(f"Before {attr}: Impact {before_metric[attr]['disparate_impact']:.4f}")
+        logging.info(f"After {attr}: Impact {after_metric[attr]['disparate_impact']:.4f}")
     logging.info("Runtime: Bias detection %.2fs, Mitigation %.2fs, Total %.2fs", 
                  mid_time - start_time, end_time - mid_time, end_time - start_time)
 
     df_sample = df.sample(1000, random_state=42)
     detect_bias(df_sample, 'mitigated_label', protected_attrs=['gender', 'race', 'age_bin'])
 
-    df.to_csv('../data/processed/raw_sentiment140.csv', index=False)
-    logging.info("Saved reweighed data to raw_sentiment140.csv")
+    output_csv = file.replace('.csv', '_reweighed.csv')
+    df.to_csv(output_csv, index=False)
+    logging.info("Saved reweighed data to %s", output_csv)
+
+if __name__ == "__main__":
+    cli()
