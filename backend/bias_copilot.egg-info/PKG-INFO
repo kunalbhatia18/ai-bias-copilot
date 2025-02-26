@@ -1,0 +1,11 @@
+Metadata-Version: 2.2
+Name: bias_copilot
+Version: 0.1.0
+Requires-Dist: tensorflow
+Requires-Dist: aif360
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: click
+Requires-Dist: scikit-learn
+Requires-Dist: ethnicolr
+Dynamic: requires-dist

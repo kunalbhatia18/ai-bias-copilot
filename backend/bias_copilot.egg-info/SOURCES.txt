@@ -1,0 +1,11 @@
+setup.py
+bias_copilot/__init__.py
+bias_copilot/cli.py
+bias_copilot/core.py
+bias_copilot/utils.py
+bias_copilot.egg-info/PKG-INFO
+bias_copilot.egg-info/SOURCES.txt
+bias_copilot.egg-info/dependency_links.txt
+bias_copilot.egg-info/entry_points.txt
+bias_copilot.egg-info/requires.txt
+bias_copilot.egg-info/top_level.txt

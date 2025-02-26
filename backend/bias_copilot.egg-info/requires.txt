@@ -1,0 +1,7 @@
+tensorflow
+aif360
+pandas
+numpy
+click
+scikit-learn
+ethnicolr

@@ -1,13 +1,15 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+# app.py 
+
+from flask import Flask, request, jsonify, Response
+from flask_cors import CORS # type: ignore
 import logging
 import sys
-from bias_copilot import analyze_file  # Import from your Day 5/6 script
+import os
+from bias_copilot import BiasAnalyzer
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})  # Allow React frontend
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
 
-# Configure logging for Flask
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s',
                     handlers=[logging.StreamHandler(sys.stdout)])
 
@@ -30,33 +32,84 @@ def analyze():
             logging.error("Invalid file type: %s", file.filename)
             return jsonify({'success': False, 'error': 'File must be a CSV'}), 400
         
-        # Save temp file and analyze
         temp_path = 'temp_upload.csv'
         file.save(temp_path)
         logging.info("Received file: %s", file.filename)
         
-        result, df = analyze_file(temp_path)
-        
-        # Clean up temp file (optional, could keep for debugging)
-        import os
+        analyzer = BiasAnalyzer()
+        result = analyzer.analyze(temp_path)
         os.remove(temp_path)
         
         logging.info("Analysis completed successfully")
         return jsonify({
-            'success': True,  # Added success field
+            'success': True,
             'before': {
-                'impact': float(result['before']['impact']),
-                'males': float(result['before']['males'] * 100),  # Convert to percentage
-                'females': float(result['before']['females'] * 100)  # Convert to percentage
+                'gender': {
+                    'impact': result['before']['gender']['disparate_impact'],
+                    'males': result['before']['gender']['positive_rate_privileged'] * 100,
+                    'females': result['before']['gender']['positive_rate_unprivileged'] * 100
+                },
+                'race': {
+                    'impact': result['before']['race']['disparate_impact'],
+                    'privileged': result['before']['race']['positive_rate_privileged'] * 100,
+                    'unprivileged': result['before']['race']['positive_rate_unprivileged'] * 100
+                },
+                'age': {
+                    'impact': result['before']['age_bin']['disparate_impact'],
+                    'old': result['before']['age_bin']['positive_rate_privileged'] * 100,
+                    'young': result['before']['age_bin']['positive_rate_unprivileged'] * 100
+                },
+                'accuracy': result['before_accuracy']
             },
             'after': {
-                'impact': float(result['after']['impact']),
-                'males': float(result['after']['males'] * 100),  # Convert to percentage
-                'females': float(result['after']['females'] * 100)  # Convert to percentage
+                'gender': {
+                    'impact': result['after']['gender']['disparate_impact'],
+                    'males': result['after']['gender']['positive_rate_privileged'] * 100,
+                    'females': result['after']['gender']['positive_rate_unprivileged'] * 100
+                },
+                'race': {
+                    'impact': result['after']['race']['disparate_impact'],
+                    'privileged': result['after']['race']['positive_rate_privileged'] * 100,
+                    'unprivileged': result['after']['race']['positive_rate_unprivileged'] * 100
+                },
+                'age': {
+                    'impact': result['after']['age_bin']['disparate_impact'],
+                    'old': result['after']['age_bin']['positive_rate_privileged'] * 100,
+                    'young': result['after']['age_bin']['positive_rate_unprivileged'] * 100
+                },
+                'accuracy': result['after_accuracy']
             }
         })
     except Exception as e:
         logging.error("Analysis failed: %s", str(e))
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/mitigate', methods=['POST'])
+def mitigate():
+    """Mitigate bias in a CSV file and return reweighted dataset."""
+    try:
+        if 'file' not in request.files:
+            logging.error("No file provided in request")
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if not file.filename.endswith('.csv'):
+            logging.error("Invalid file type: %s", file.filename)
+            return jsonify({'success': False, 'error': 'File must be a CSV'}), 400
+        
+        temp_path = 'temp_upload.csv'
+        file.save(temp_path)
+        logging.info("Received file for mitigation: %s", file.filename)
+        
+        analyzer = BiasAnalyzer()
+        result = analyzer.analyze(temp_path)
+        reweighted_csv = result['reweighted_data'].to_csv(index=False)
+        os.remove(temp_path)
+        
+        logging.info("Mitigation completed successfully")
+        return Response(reweighted_csv, mimetype='text/csv', headers={"Content-Disposition": "attachment;filename=reweighted_dataset.csv"})
+    except Exception as e:
+        logging.error("Mitigation failed: %s", str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
